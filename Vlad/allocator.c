@@ -12,7 +12,7 @@
 #include <stdlib.h>
 #include <assert.h>
 
-#define HEADER_SIZE    sizeof(struct free_list_header)  
+#define HEADER_SIZE    sizeof(struct free_list_header)
 #define MAGIC_FREE     0xDEADBEEF
 #define MAGIC_ALLOC    0xBEEFDEAD
 
@@ -36,35 +36,77 @@ static vsize_t memory_size;   // number of bytes malloc'd in memory[]
 
 
 // Input: size - number of bytes to make available to the allocator
-// Output: none              
+// Output: none
 // Precondition: Size is a power of two.
 // Postcondition: `size` bytes are now available to the allocator
-// 
+//
 // (If the allocator is already initialised, this function does nothing,
 //  even if it was initialised with different size)
 
-void vlad_init(u_int32_t size)
-{
+void vlad_init(u_int32_t size){
    // dummy statements to keep compiler happy
-   memory = NULL;
-   free_list_ptr = (vaddr_t)0;
-   memory_size = 0;
-   // TODO
+   //memory = NULL;
+   free_list_ptr = (vaddr_t)0; //set the initial header pointer
+   //memory_size = 0;
    // remove the above when you implement your code
+
+   //NEED TO ADD LOGIC TO DETERMINE SIZE IF IT IS NOT A POWER OF 2^n
+   memory=malloc(size); //allocate memory block
+   memory_size=size; //store amount of size
+   free_header_t *Head;
+   Head=(free_header_t*)memory;
+   Head->magic=MAGIC_FREE;
+   Head->size=size;
+   Head->next=0; //note these are indexs not actual pointers
+   Head->prev=size;
 }
 
 
 // Input: n - number of bytes requested
 // Output: p - a pointer, or NULL
 // Precondition: n is < size of memory available to the allocator
-// Postcondition: If a region of size n or greater cannot be found, p = NULL 
+// Postcondition: If a region of size n or greater cannot be found, p = NULL
 //                Else, p points to a location immediately after a header block
-//                      for a newly-allocated region of some size >= 
+//                      for a newly-allocated region of some size >=
 //                      n + header size.
 
 void *vlad_malloc(u_int32_t n)
 {
-   // TODO
+   //First we need to iterate through the current free blocks in an efficient manner stuff that middle line big screen master race
+   //note that index is not a pointer, it is an u32int
+   int offset=free_list_ptr;
+   int x=1;
+   while (x==1){
+      free_header_t *Head=(free_header_t*)memory+offset;
+      if (Head->size>=HEADER_SIZE+n){ //good block found
+         while ((Head->size/2)>=HEADER_SIZE+n){ //while not perfect
+            //div block by 2, create the div'd block
+            free_header_t *HeaderDiv=Head+(Head->size/2); //unsure if right pointers here
+            HeaderDiv->magic=MAGIC_FREE;
+            HeaderDiv->prev=offset; //always moving to the left hence why constant
+            HeaderDiv->next=Head->next;
+            HeaderDiv->size=Head->size/2;
+            if (Head->next>=HeaderDiv->size){
+               free_header_t *HeadNext=(free_header_t*)memory+HeaderDiv->next;
+               HeadNext->prev=HeaderDiv->size-HeadNext->prev;
+            }
+
+            Head->size=Head->size/2;
+            Head->next=offset+Head->size;
+         }
+         //now that the perfect head has been achieved
+         Head->magic=MAGIC_ALLOC;
+         //need to append block out of list
+         free_header_t *HeadPrev=(free_header_t*)memory+Head->prev;
+         free_header_t *HeaderDiv=Head+(Head->size);
+         HeadPrev->next=Head->next;
+         HeaderDiv->prev=Head->prev;
+         return ((void*)(memory + offset + HEADER_SIZE));
+      } else {
+         offset=Head->next; //iterate to next block
+      }
+      if (offset==free_list_ptr) return NULL; //Entire list iterated with no success therefore null
+   }
    return NULL; // temporarily
 }
 
@@ -73,7 +115,7 @@ void *vlad_malloc(u_int32_t n)
 // Output: none
 // Precondition: object points to a location immediately after a header block
 //               within the allocator's memory.
-// Postcondition: The region pointed to by object can be re-allocated by 
+// Postcondition: The region pointed to by object can be re-allocated by
 //                vlad_malloc
 
 void vlad_free(void *object)
@@ -86,22 +128,38 @@ void vlad_free(void *object)
 // Precondition: allocator memory was once allocated by vlad_init()
 // Postcondition: allocator is unusable until vlad_int() executed again
 
-void vlad_end(void)
-{
-   // TODO
+void vlad_end(void){
+   free(memory); //end it all
 }
 
 
 // Precondition: allocator has been vlad_init()'d
 // Postcondition: allocator stats displayed on stdout
 
-void vlad_stats(void)
-{
-   // TODO
-   // put whatever code you think will help you
-   // understand Vlad's current state in this function
-   // REMOVE all pfthese statements when your vlad_malloc() is done
-   printf("vlad_stats() won't work until vlad_malloc() works\n");
+void vlad_stats(void){
+   printf("Memory init at %p\n",memory);
+   printf("Magic free is %u\n",MAGIC_FREE);
+   printf("Magic Allocated is %u\n\n",MAGIC_ALLOC);
+   /*free_header_t *Head=(free_header_t*)memory;
+   printf("Memory read initial block %u\n",Head->magic);*/
+   int x=1;
+   int offset=0;
+   //lets write a loop that prints all current free blocks
+   while (x==1){
+      free_header_t *Head=(free_header_t*)memory+offset;
+      printf("Block at offset %d\n",offset);
+      printf("Block memory Location %p\n",Head);
+      printf("Magic %u",Head->magic);
+      if (Head->magic==MAGIC_FREE) printf(" (free)\n");
+      else if (Head->magic==MAGIC_ALLOC) printf(" (alloc)\n");
+      else printf("UNKNOWN\n");
+      printf("Size %u\n",Head->size);
+      printf("Previous index %u\n",Head->prev);
+      printf("Next index %u\n\n",Head->next);
+      //if (Head->next==0) x=0; else offset+=Head->next;
+      offset+=Head->size; //move on to next block
+      if (offset>=memory_size) x=0;
+   }
    return;
 }
 
@@ -113,19 +171,19 @@ void vlad_stats(void)
 //
 // Fancy allocator stats
 // 2D diagram for your allocator.c ... implementation
-// 
+//
 // Copyright (C) 2014 Alen Bou-Haidar <alencool@gmail.com>
-// 
-// FancyStat is free software: you can redistribute it and/or modify 
+//
+// FancyStat is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 2 of the License, or 
+// the Free Software Foundation, either version 2 of the License, or
 // (at your option) any later version.
-// 
+//
 // FancyStat is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>
 
@@ -134,9 +192,9 @@ void vlad_stats(void)
 
 #define STAT_WIDTH  32
 #define STAT_HEIGHT 16
-#define BG_FREE      "\x1b[48;5;35m" 
+#define BG_FREE      "\x1b[48;5;35m"
 #define BG_ALLOC     "\x1b[48;5;39m"
-#define FG_FREE      "\x1b[38;5;35m" 
+#define FG_FREE      "\x1b[38;5;35m"
 #define FG_ALLOC     "\x1b[38;5;39m"
 #define CL_RESET     "\x1b[0m"
 
@@ -144,7 +202,7 @@ void vlad_stats(void)
 typedef struct point {int x, y;} point;
 
 static point offset_to_point(int offset,  int size, int is_end);
-static void fill_block(char graph[STAT_HEIGHT][STAT_WIDTH][20], 
+static void fill_block(char graph[STAT_HEIGHT][STAT_WIDTH][20],
                         int offset, char * label);
 
 
@@ -164,8 +222,8 @@ void vlad_reveal(void *alpha[26])
 
 	// TODO
 	// REMOVE these statements when your vlad_malloc() is done
-    printf("vlad_reveal() won't work until vlad_malloc() works\n");
-    return;
+    //printf("vlad_reveal() won't work until vlad_malloc() works\n");
+    //return;
 
     // initilise size lists
     for (i=0; i<26; i++) {
@@ -180,7 +238,7 @@ void vlad_reveal(void *alpha[26])
     while (offset < memory_size){
         block = (free_header_t *)(memory + offset);
         if (block->magic == MAGIC_FREE) {
-            snprintf(free_sizes[free_count++], 32, 
+            snprintf(free_sizes[free_count++], 32,
                 "%d) %d bytes", i, block->size);
             snprintf(label, 3, "%d", i++);
             fill_block(graph, offset,label);
@@ -194,7 +252,7 @@ void vlad_reveal(void *alpha[26])
         if (alpha[i] != NULL) {
             offset = ((byte *) alpha[i] - (byte *) memory) - HEADER_SIZE;
             block = (free_header_t *)(memory + offset);
-            snprintf(alloc_sizes[alloc_count++], 32, 
+            snprintf(alloc_sizes[alloc_count++], 32,
                 "%c) %d bytes", 'a' + i, block->size);
             snprintf(label, 3, "%c", 'a' + i);
             fill_block(graph, offset,label);
@@ -224,7 +282,7 @@ void vlad_reveal(void *alpha[26])
 }
 
 // Fill block area
-static void fill_block(char graph[STAT_HEIGHT][STAT_WIDTH][20], 
+static void fill_block(char graph[STAT_HEIGHT][STAT_WIDTH][20],
                         int offset, char * label)
 {
     point start, end;
@@ -254,7 +312,7 @@ static void fill_block(char graph[STAT_HEIGHT][STAT_WIDTH][20],
             } else {
                 snprintf(text, 3, "  ");
             }
-            sprintf(graph[y][x], "%s%s"CL_RESET, color, text);            
+            sprintf(graph[y][x], "%s%s"CL_RESET, color, text);
         }
     }
 }
@@ -277,7 +335,7 @@ static point offset_to_point(int offset,  int size, int is_end)
     while (curr) {
         pot[inY] >>= 1;
         if (curr & offset) {
-            crd[inY] += pot[inY]*sign; 
+            crd[inY] += pot[inY]*sign;
         }
         inY = !inY; // flip which axis to look at
         curr >>= 1; // shift to the right to advance
