@@ -77,7 +77,7 @@ void *vlad_malloc(u_int32_t n){ //need to add corruption testing, short circuiti
    int x=1;
    while (x==1){
       free_header_t *Head=(free_header_t*)memory+offset;
-      if (Head->size>=HEADER_SIZE+n){ //good block found
+      if (Head->size>=HEADER_SIZE+n&&Head->magic==MAGIC_FREE){ //good block found
          while ((Head->size/2)>=HEADER_SIZE+n){ //while not perfect
             //div block by 2, create the div'd block
             free_header_t *HeaderDiv=Head+(Head->size/2); //unsure if right pointers here
@@ -111,10 +111,10 @@ void *vlad_malloc(u_int32_t n){ //need to add corruption testing, short circuiti
          //need to append block out of list
          printf("Head prev after loop %u\n",Head->prev);
          free_header_t *HeadPrev=(free_header_t*)memory+Head->prev;
-         free_header_t *HeaderDiv=Head+(Head->size);
+         free_header_t *HeadNext=(free_header_t*)memory+Head->next;
          HeadPrev->next=Head->next;
-         HeaderDiv->prev=Head->prev;
-         if (HeaderDiv->prev==memory_size) HeaderDiv->prev=0;
+         HeadNext->prev=Head->prev;
+         if (HeadNext->prev==memory_size) HeadNext->prev=0;
          //return ((void*)(memory + offset + HEADER_SIZE));
          return((void*)Head+HEADER_SIZE);
       } else {
