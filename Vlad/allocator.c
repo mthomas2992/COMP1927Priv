@@ -77,6 +77,10 @@ void *vlad_malloc(u_int32_t n){ //need to add corruption testing, short circuiti
    int x=1;
    while (x==1){
       free_header_t *Head=(free_header_t*)memory+offset;
+      if ((Head->magic!=MAGIC_FREE)&&(Head->magic!=MAGIC_ALLOC)){ //corruption check
+         fprintf(stderr, "Memory corruption");
+         abort();
+      }
       if (Head->size>=HEADER_SIZE+n&&Head->magic==MAGIC_FREE){ //good block found
          while ((Head->size/2)>=HEADER_SIZE+n){ //while not perfect
             //div block by 2, create the div'd block
@@ -85,36 +89,21 @@ void *vlad_malloc(u_int32_t n){ //need to add corruption testing, short circuiti
             HeaderDiv->prev=offset; //always moving to the left hence why constant
             HeaderDiv->next=Head->next;
             HeaderDiv->size=Head->size/2;
-            if (Head->next>=HeaderDiv->size){
-               free_header_t *HeadNext=(free_header_t*)memory+HeaderDiv->next;
-               HeadNext->prev=HeaderDiv->size-HeadNext->prev;
-            }
 
-            //Need to make this run only on the first split
-            if (((byte*)Head==memory)&&(Head->size==memory_size/2))/*&&((byte*)HeaderDiv==(memory+(memory_size/2))))*/{ //if head is at offset 0 and first cut
-               Head->prev=memory_size-Head->size;
-               printf("executed\n");
-               printf("head size %u\n",Head->size);
-               printf("Head prev calculated %u\n",Head->prev);
-            }
+            //Insert div'd block into the free list (simplified from if statements, may take slightly more memory but less processing)
+            free_header_t *HeadNext=(free_header_t*)memory+HeaderDiv->next;
+            free_header_t *HeadPrev=(free_header_t*)memory+HeaderDiv->prev;
+            HeadNext->prev=HeadPrev->next=((byte*)HeaderDiv-memory)/16;
 
             Head->size=Head->size/2;
             Head->next=offset+Head->size;
-            if (Head->next==memory_size) Head->next=0;
-            if (Head->prev==memory_size) Head->prev=0;
-            if (HeaderDiv->prev==memory_size) HeaderDiv->prev=0;
-            if (HeaderDiv->next==memory_size) HeaderDiv->next=0;
-            printf("Head prev end of loop %u\n",Head->prev);
          }
-         //now that the perfect head has been achieved
+         //Perfect achieved, allocated and append out of free list
          Head->magic=MAGIC_ALLOC;
-         //need to append block out of list
-         printf("Head prev after loop %u\n",Head->prev);
          free_header_t *HeadPrev=(free_header_t*)memory+Head->prev;
          free_header_t *HeadNext=(free_header_t*)memory+Head->next;
          HeadPrev->next=Head->next;
          HeadNext->prev=Head->prev;
-         if (HeadNext->prev==memory_size) HeadNext->prev=0;
          //return ((void*)(memory + offset + HEADER_SIZE));
          return((void*)Head+HEADER_SIZE);
       } else {
