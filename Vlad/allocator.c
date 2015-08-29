@@ -71,8 +71,6 @@ void vlad_init(u_int32_t size){
 //                      n + header size.
 
 void *vlad_malloc(u_int32_t n){ //need to add corruption testing, short circuiting
-   //First we need to iterate through the current free blocks in an efficient manner stuff that middle line big screen master race
-   //note that index is not a pointer, it is an u32int
    int offset=free_list_ptr;
    int x=1;
    while (x==1){
@@ -124,44 +122,30 @@ void *vlad_malloc(u_int32_t n){ //need to add corruption testing, short circuiti
 
 void vlad_free(void *object){ //NOTE THAT OBJECT IS THE POINTER OF HEADER + N
    object-=HEADER_SIZE; //Find header pointer
-   printf("Object pointer after minus %p\n",object);
    free_header_t *Head=(free_header_t*)object;//find head
    free_header_t *HeadSearch=(free_header_t*)object;
-   printf("Head pointer %p\n",Head);
-   printf("I got to here\n");
    Head->magic=MAGIC_FREE; //set magic
-   printf("new head magic %u\n",Head->magic);
    //Find closest region
    int found=0;
    int looped=0;
    while (found==0){ //need case for when its the only free object
-      printf("looping\n");
       HeadSearch+=HeadSearch->size;//iterate forward
       if (HeadSearch->magic==MAGIC_FREE){ //found a free one
-         printf("HeadSearch header found at %p\n",HeadSearch);
          found=1;
-      }  else if ((((byte*)HeadSearch-memory)/16)>=memory_size) { //iterated beyond end of block
-         printf("iterated beyond\n");
-         HeadSearch=(free_header_t*)memory;
+      }  else if ((((byte*)HeadSearch-memory)/16)>=memory_size&&looped==0) { //iterated beyond end of block
+         HeadSearch=(free_header_t*)memory; //reset to begining NEED TO TEST THIS
          looped=1;
       } else if (looped==1&&(void*)HeadSearch>=(void*)Head) {//no other free blocks
          Head->next=Head->prev=((byte*)HeadSearch-memory)/16; //should be offset
-         printf("No other blocks free\n");
+         if (Head->next==memory_size) Head->next=Head->prev=0;
          found=1;
          return;
       }
    }
-   u_int32_t HeadOffset =((byte*)Head-memory)/16;
-   Head->next=((byte*)HeadSearch-memory)/16;//should be offset
-   printf("Next calculate offset %u\n",Head->next);
+   Head->next=((byte*)HeadSearch-memory)/16;//headsearch offset
    Head->prev=HeadSearch->prev;
-   printf("Previous obtained offset %u\n",Head->prev);
-   HeadSearch->prev=HeadOffset; //should be head offset
-   printf("Heads calculated offset for next prev %u\n",HeadSearch->prev);
-   free_header_t *HeadPrev=(free_header_t*)memory+Head->prev; //right now this pointer overlaps as Head->prev==0
-   HeadPrev->next=HeadOffset;
-   printf("Recalculated heads offset for prev->next %u\n",HeadPrev->next);
-   printf("end of free function %u\n",Head->next);
+   free_header_t *HeadPrev=(free_header_t*)memory+Head->prev;
+   HeadSearch->prev=HeadPrev->next=((byte*)Head-memory)/16;
 }
 
 
