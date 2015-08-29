@@ -58,7 +58,7 @@ void vlad_init(u_int32_t size){
    Head->magic=MAGIC_FREE;
    Head->size=size;
    Head->next=0; //note these are indexs not actual pointers
-   Head->prev=size;
+   Head->prev=0;
 }
 
 
@@ -70,8 +70,7 @@ void vlad_init(u_int32_t size){
 //                      for a newly-allocated region of some size >=
 //                      n + header size.
 
-void *vlad_malloc(u_int32_t n)
-{
+void *vlad_malloc(u_int32_t n){ //need to add corruption testing, short circuiting
    //First we need to iterate through the current free blocks in an efficient manner stuff that middle line big screen master race
    //note that index is not a pointer, it is an u32int
    int offset=free_list_ptr;
@@ -91,17 +90,33 @@ void *vlad_malloc(u_int32_t n)
                HeadNext->prev=HeaderDiv->size-HeadNext->prev;
             }
 
+            //Need to make this run only on the first split
+            if (((byte*)Head==memory)&&(Head->size==memory_size/2))/*&&((byte*)HeaderDiv==(memory+(memory_size/2))))*/{ //if head is at offset 0 and first cut
+               Head->prev=memory_size-Head->size;
+               printf("executed\n");
+               printf("head size %u\n",Head->size);
+               printf("Head prev calculated %u\n",Head->prev);
+            }
+
             Head->size=Head->size/2;
             Head->next=offset+Head->size;
+            if (Head->next==memory_size) Head->next=0;
+            if (Head->prev==memory_size) Head->prev=0;
+            if (HeaderDiv->prev==memory_size) HeaderDiv->prev=0;
+            if (HeaderDiv->next==memory_size) HeaderDiv->next=0;
+            printf("Head prev end of loop %u\n",Head->prev);
          }
          //now that the perfect head has been achieved
          Head->magic=MAGIC_ALLOC;
          //need to append block out of list
+         printf("Head prev after loop %u\n",Head->prev);
          free_header_t *HeadPrev=(free_header_t*)memory+Head->prev;
          free_header_t *HeaderDiv=Head+(Head->size);
          HeadPrev->next=Head->next;
          HeaderDiv->prev=Head->prev;
-         return ((void*)(memory + offset + HEADER_SIZE));
+         if (HeaderDiv->prev==memory_size) HeaderDiv->prev=0;
+         //return ((void*)(memory + offset + HEADER_SIZE));
+         return((void*)Head+HEADER_SIZE);
       } else {
          offset=Head->next; //iterate to next block
       }
@@ -118,9 +133,46 @@ void *vlad_malloc(u_int32_t n)
 // Postcondition: The region pointed to by object can be re-allocated by
 //                vlad_malloc
 
-void vlad_free(void *object)
-{
-   // TODO
+void vlad_free(void *object){ //NOTE THAT OBJECT IS THE POINTER OF HEADER + N
+   object-=HEADER_SIZE; //Find header pointer
+   printf("Object pointer after minus %p\n",object);
+   free_header_t *Head=(free_header_t*)object;//find head
+   free_header_t *HeadSearch=(free_header_t*)object;
+   printf("Head pointer %p\n",Head);
+   printf("I got to here\n");
+   Head->magic=MAGIC_FREE; //set magic
+   printf("new head magic %u\n",Head->magic);
+   //Find closest region
+   int found=0;
+   int looped=0;
+   while (found==0){ //need case for when its the only free object
+      printf("looping\n");
+      HeadSearch+=HeadSearch->size;//iterate forward
+      if (HeadSearch->magic==MAGIC_FREE){ //found a free one
+         printf("HeadSearch header found at %p\n",HeadSearch);
+         found=1;
+      }  else if ((((byte*)HeadSearch-memory)/16)>=memory_size) { //iterated beyond end of block
+         printf("iterated beyond\n");
+         HeadSearch=(free_header_t*)memory;
+         looped=1;
+      } else if (looped==1&&(void*)HeadSearch>=(void*)Head) {//no other free blocks
+         Head->next=Head->prev=((byte*)HeadSearch-memory)/16; //should be offset
+         printf("No other blocks free\n");
+         found=1;
+         return;
+      }
+   }
+   u_int32_t HeadOffset =((byte*)Head-memory)/16;
+   Head->next=((byte*)HeadSearch-memory)/16;//should be offset
+   printf("Next calculate offset %u\n",Head->next);
+   Head->prev=HeadSearch->prev;
+   printf("Previous obtained offset %u\n",Head->prev);
+   HeadSearch->prev=HeadOffset; //should be head offset
+   printf("Heads calculated offset for next prev %u\n",HeadSearch->prev);
+   free_header_t *HeadPrev=(free_header_t*)memory+Head->prev; //right now this pointer overlaps as Head->prev==0
+   HeadPrev->next=HeadOffset;
+   printf("Recalculated heads offset for prev->next %u\n",HeadPrev->next);
+   printf("end of free function %u\n",Head->next);
 }
 
 
@@ -142,10 +194,9 @@ void vlad_stats(void){
    printf("Magic Allocated is %u\n\n",MAGIC_ALLOC);
    /*free_header_t *Head=(free_header_t*)memory;
    printf("Memory read initial block %u\n",Head->magic);*/
-   int x=1;
    int offset=0;
    //lets write a loop that prints all current free blocks
-   while (x==1){
+   while (offset<memory_size){
       free_header_t *Head=(free_header_t*)memory+offset;
       printf("Block at offset %d\n",offset);
       printf("Block memory Location %p\n",Head);
@@ -158,7 +209,6 @@ void vlad_stats(void){
       printf("Next index %u\n\n",Head->next);
       //if (Head->next==0) x=0; else offset+=Head->next;
       offset+=Head->size; //move on to next block
-      if (offset>=memory_size) x=0;
    }
    return;
 }
@@ -236,7 +286,7 @@ void vlad_reveal(void *alpha[26])
     i = 1;
     free_count = 0;
     while (offset < memory_size){
-        block = (free_header_t *)(memory + offset);
+        block = (free_header_t *)memory + offset; //changed this line from casting the entire addition to just memory and it made it work
         if (block->magic == MAGIC_FREE) {
             snprintf(free_sizes[free_count++], 32,
                 "%d) %d bytes", i, block->size);
