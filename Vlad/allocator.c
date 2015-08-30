@@ -143,6 +143,30 @@ void *vlad_malloc(u_int32_t n){ //need to add corruption testing, short circuiti
    return NULL; //No possbile places to alloc so return NULL per specs
 }
 
+void vlad_merge(free_header_t *Head){ //recursive function
+   //MERGE PART OF FREE FUNCTION
+   free_header_t *HeadmergeNext=(free_header_t*)memory+Head->next;
+   free_header_t *HeadmergePrev=(free_header_t*)memory+Head->prev;
+   u_int32_t HeadOffset=((byte*)Head-memory)/16; //calculated here once to avoid multiple duplicate executions
+   u_int32_t HeadmergePrevOffset=((byte*)HeadmergePrev-memory)/16; //same as above
+   if ((Head->size==HeadmergeNext->size)&&((HeadOffset+Head->size)==Head->next)&&(HeadmergeNext->magic==MAGIC_FREE)&&(HeadOffset%(Head->size*2)==0)){ //first statement checks if of equal size, second checks if it is a neighbour
+      Head->next=HeadmergeNext->next;//free next header, point head at headernext->next
+      free_header_t *HeadmergeNextnext=(free_header_t*)memory+Head->next;//point headernext->next* at head
+      HeadmergeNextnext->prev=HeadOffset; //make the header beyond the one been freed have its previous pointer point back at the now merged head
+      Head->size=Head->size+HeadmergeNext->size; //actually merge sizes
+      vlad_merge(Head); //call function again to merge the next head
+   } else if ((Head->size==HeadmergePrev->size)&&((HeadmergePrevOffset+HeadmergePrev->size)==HeadOffset)&&(HeadmergePrev->magic==MAGIC_FREE)&&((HeadOffset%(Head->size*2)!=0)||(HeadmergePrevOffset==0))){
+      HeadmergePrev->next=Head->next;//free current header, HeadPrev-> next skip to head->next
+      HeadmergeNext->prev=HeadmergePrevOffset;//Headnext-> prev skip back to HeadPrev
+      HeadmergePrev->size=HeadmergePrev->size+Head->size; //actually merge sizes
+      Head=HeadmergePrev; //set header as the merged header for recursion and to prevent head pointing at a now non-existant head
+      vlad_merge(Head); // as other if, i previously did this in a while loop but recursion is cooler
+   } else {
+      if (HeadOffset<free_list_ptr) free_list_ptr=HeadOffset; //set the freed head (always gets to this line even if no merge) as the new pointer, only if it is further left
+      return; //no possible legal merges and no more code to execute so stop loop
+   }
+}
+
 
 // Input: object, a pointer.
 // Output: none
@@ -175,28 +199,8 @@ void vlad_free(void *object){ //NOTE THAT OBJECT IS THE POINTER OF HEADER + N
    Head->prev=HeadSearch->prev;
    free_header_t *HeadPrev=(free_header_t*)memory+Head->prev;
    HeadSearch->prev=HeadPrev->next=((byte*)Head-memory)/16;//now that header points to list modify list to include it
-
-   //MERGE PART OF FREE FUNCTION
-   while (1){//this could have a crazy long condition in it but to save space it iterates till no more mergers can be made, the condition if here would be an OR statment of the two conditions in the if statements below
-      free_header_t *HeadmergeNext=(free_header_t*)memory+Head->next;
-      free_header_t *HeadmergePrev=(free_header_t*)memory+Head->prev;
-      u_int32_t HeadOffset=((byte*)Head-memory)/16; //calculated here once to avoid multiple duplicate executions
-      u_int32_t HeadmergePrevOffset=((byte*)HeadmergePrev-memory)/16; //same as above
-      if ((Head->size==HeadmergeNext->size)&&((HeadOffset+Head->size)==Head->next)&&(HeadmergeNext->magic==MAGIC_FREE)&&(HeadOffset%(Head->size*2)==0)){ //first statement checks if of equal size, second checks if it is a neighbour
-         Head->next=HeadmergeNext->next;//free next header, point head at headernext->next
-         free_header_t *HeadmergeNextnext=(free_header_t*)memory+Head->next;//point headernext->next* at head
-         HeadmergeNextnext->prev=HeadOffset; //make the header beyond the one been freed have its previous pointer point back at the now merged head
-         Head->size=Head->size+HeadmergeNext->size; //actually merge sizes
-      } else if ((Head->size==HeadmergePrev->size)&&((HeadmergePrevOffset+HeadmergePrev->size)==HeadOffset)&&(HeadmergePrev->magic==MAGIC_FREE)&&((HeadOffset%(Head->size*2)!=0)||(HeadmergePrevOffset==0))){
-         HeadmergePrev->next=Head->next;//free current header, HeadPrev-> next skip to head->next
-         HeadmergeNext->prev=HeadmergePrevOffset;//Headnext-> prev skip back to HeadPrev
-         HeadmergePrev->size=HeadmergePrev->size+Head->size; //actually merge sizes
-         Head=HeadmergePrev; //set header as the merged header for recursion and to prevent head pointing at a now non-existant head
-      } else {
-         if (HeadOffset<free_list_ptr) free_list_ptr=HeadOffset; //set the freed head (always gets to this line even if no merge) as the new pointer, only if it is further left
-         return; //no possible legal merges and no more code to execute so stop loop
-      }
-   }
+   //call vlad merge function as per spec its in another function
+   vlad_merge(Head);
 }
 
 
