@@ -70,7 +70,6 @@ void vlad_init(u_int32_t size){
       fprintf(stderr, "vlad_init: invalid size (Negative value)\n");
       abort();
    }
-   printf("size determined to be %u\n",size);
 
    memory=malloc(size); //allocate memory block
    if (memory==NULL){
@@ -101,7 +100,7 @@ void *vlad_malloc(u_int32_t n){ //need to add corruption testing, short circuiti
    while (x==1){
       free_header_t *Head=(free_header_t*)memory+offset;
       if ((Head->magic!=MAGIC_FREE)&&(Head->magic!=MAGIC_ALLOC)){ //corruption check
-         fprintf(stderr, "Memory corruption");
+         fprintf(stderr, "Memory corruption\n");
          abort();
       }
       if (Head->size>=HEADER_SIZE+n&&Head->magic==MAGIC_FREE){ //good block found
