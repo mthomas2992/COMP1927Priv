@@ -161,12 +161,6 @@ void vlad_free(void *object){ //NOTE THAT OBJECT IS THE POINTER OF HEADER + N
          HeadSearch=(free_header_t*)memory; //reset to begining NEED TO TEST THIS
          looped=1;
          if (HeadSearch->magic==MAGIC_FREE) found=1; //temp counter to issue of iterate occuring to early
-      } else if (looped==1&&(void*)HeadSearch>=(void*)Head) {//no other free blocks
-         Head->next=Head->prev=((byte*)HeadSearch-memory)/16; //should be offset
-         if (Head->next==memory_size) Head->next=Head->prev=0;
-         found=1;
-         printf("lone\n");
-         return; //doesn't need merging as its the only block here
       }
    }
    Head->next=((byte*)HeadSearch-memory)/16;//headsearch offset
@@ -182,20 +176,20 @@ void vlad_free(void *object){ //NOTE THAT OBJECT IS THE POINTER OF HEADER + N
    while (mergefail==0){
       free_header_t *HeadmergeNext=(free_header_t*)memory+Head->next;
       free_header_t *HeadmergePrev=(free_header_t*)memory+Head->prev;
-      if ((Head->size==HeadmergeNext->size)&&((((byte*)Head-memory)/16)+Head->size)==Head->next&&(HeadmergeNext->magic==MAGIC_FREE)){ //first statement checks if of equal size, second checks if it is a neighbour
+      u_int32_t HeadOffset=((byte*)Head-memory)/16; //calculated here once to prevent execution times
+      u_int32_t HeadmergePrevOffset=((byte*)HeadmergePrev-memory)/16;
+      if ((Head->size==HeadmergeNext->size)&&((HeadOffset+Head->size)==Head->next)&&(HeadmergeNext->magic==MAGIC_FREE)&&(HeadOffset%(Head->size*2)==0)){ //first statement checks if of equal size, second checks if it is a neighbour
          printf("merging with next\n");//free next header
          Head->next=HeadmergeNext->next;//point head at headernext->next
          free_header_t *HeadmergeNextnext=(free_header_t*)memory+Head->next;//point headernext->next* at head
-         HeadmergeNextnext->prev=((byte*)Head-memory)/16;
+         HeadmergeNextnext->prev=HeadOffset;
          Head->size=Head->size+HeadmergeNext->size;
-         //printf("__________________________________________________________\n");
-         //vlad_stats();
-      } else if ((Head->size==HeadmergePrev->size)&&((((byte*)HeadmergePrev-memory)/16)+HeadmergePrev->size)==(((byte*)Head-memory)/16)){ //same as prev but for prev if that somehow happens when last head is fed in
+      } else if ((Head->size==HeadmergePrev->size)&&((HeadmergePrevOffset+HeadmergePrev->size)==HeadOffset)&&(HeadmergePrev->magic==MAGIC_FREE)&&((HeadOffset%(Head->size*2)!=0)||(HeadmergePrevOffset==0))){ //same as prev but for prev if that somehow happens when last head is fed in
          printf("merging with prev\n");//free current header
          //HeadPrev-> next skip to head->next
          HeadmergePrev->next=Head->next;
          //Headnext-> prev skip back to HeadPrev
-         HeadmergeNext->prev=((byte*)HeadmergePrev-memory)/16;
+         HeadmergeNext->prev=HeadmergePrevOffset;
          HeadmergePrev->size=HeadmergePrev->size+Head->size;
          Head=HeadmergePrev;
       } else {
