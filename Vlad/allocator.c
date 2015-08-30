@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <assert.h>
 
+
 #define HEADER_SIZE    sizeof(struct free_list_header)
 #define MAGIC_FREE     0xDEADBEEF
 #define MAGIC_ALLOC    0xBEEFDEAD
@@ -49,9 +50,33 @@ void vlad_init(u_int32_t size){
    free_list_ptr = (vaddr_t)0; //set the initial header pointer
    //memory_size = 0;
    // remove the above when you implement your code
+   //Size determining logic
+   if (size==0){ //if they ask for 0
+      fprintf(stderr, "vlad_init: invalid size (0)\n");
+      abort();
+   }
+   if (((size&(size-1))!=0)&&size>512){
+      size--;
+      size |= size >> 1;
+      size |= size >> 2;
+      size |= size >> 4;
+      size |= size >> 8;
+      size |= size >> 16;
+      size++;
+   } else if (size<=512){
+      size=512; //if below size threshold (given)
+   }
+   if (size<=0){ //due to bitshifting technique 0 is counted as power of 0, this catches negatives
+      fprintf(stderr, "vlad_init: invalid size (Negative value)\n");
+      abort();
+   }
+   printf("size determined to be %u\n",size);
 
-   //NEED TO ADD LOGIC TO DETERMINE SIZE IF IT IS NOT A POWER OF 2^n
    memory=malloc(size); //allocate memory block
+   if (memory==NULL){
+      fprintf(stderr, "vlad_init: insufficient memory\n");
+      abort();
+   }
    memory_size=size; //store amount of size
    free_header_t *Head;
    Head=(free_header_t*)memory;
@@ -92,7 +117,7 @@ void *vlad_malloc(u_int32_t n){ //need to add corruption testing, short circuiti
             free_header_t *HeadNext=(free_header_t*)memory+HeaderDiv->next;
             free_header_t *HeadPrev=(free_header_t*)memory+HeaderDiv->prev;
             HeadNext->prev=HeadPrev->next=((byte*)HeaderDiv-memory)/16;
-
+            //cull primary head
             Head->size=Head->size/2;
             Head->next=offset+Head->size;
          }
@@ -109,7 +134,7 @@ void *vlad_malloc(u_int32_t n){ //need to add corruption testing, short circuiti
       }
       if (offset==free_list_ptr) return NULL; //Entire list iterated with no success therefore null
    }
-   return NULL; // temporarily
+   return NULL; // if it gets here something has gone wrong
 }
 
 
