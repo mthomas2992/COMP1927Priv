@@ -45,18 +45,15 @@ static vsize_t memory_size;   // number of bytes malloc'd in memory[]
 //  even if it was initialised with different size)
 
 void vlad_init(u_int32_t size){
-   // dummy statements to keep compiler happy
-   //memory = NULL;
    free_list_ptr = (vaddr_t)0; //set the initial header pointer
-   //memory_size = 0;
-   // remove the above when you implement your code
+   memory=NULL;//made to equal null as to detect if malloc fails later
    //Size determining logic
    if (size==0){ //if they ask for 0
       fprintf(stderr, "vlad_init: invalid size (0)\n");
       abort();
    }
-   if (((size&(size-1))!=0)&&size>512){
-      size--;
+   if (((size&(size-1))!=0)&&size>512){ //& operator used to determine if size already a power of 2, if not begin rounding if the size is large enough (spec'd)
+      size--; //crazy bitshifting interpretation of log laws
       size |= size >> 1;
       size |= size >> 2;
       size |= size >> 4;
@@ -82,7 +79,7 @@ void vlad_init(u_int32_t size){
    Head->magic=MAGIC_FREE;
    Head->size=size;
    Head->next=0; //note these are indexs not actual pointers
-   Head->prev=0;
+   Head->prev=0; //first element should point to itself
 }
 
 
@@ -95,10 +92,9 @@ void vlad_init(u_int32_t size){
 //                      n + header size.
 
 void *vlad_malloc(u_int32_t n){ //need to add corruption testing, short circuiting
-   int offset=free_list_ptr;
-   int x=1;
-   while (x==1){
-      free_header_t *Head=(free_header_t*)memory+offset;
+   u_int32_t offset=free_list_ptr;
+   free_header_t *Head=(free_header_t*)memory+offset;
+   do{
       if ((Head->magic!=MAGIC_FREE)&&(Head->magic!=MAGIC_ALLOC)){ //corruption check
          fprintf(stderr, "Memory corruption\n");
          abort();
@@ -126,14 +122,28 @@ void *vlad_malloc(u_int32_t n){ //need to add corruption testing, short circuiti
          free_header_t *HeadNext=(free_header_t*)memory+Head->next;
          HeadPrev->next=Head->next;
          HeadNext->prev=Head->prev;
-         //return ((void*)(memory + offset + HEADER_SIZE));
+         //free pointer logic
+         free_header_t *FreePoint=(free_header_t*)memory+free_list_ptr;
+         int max=0;
+         while (FreePoint->magic!=MAGIC_FREE){ //ensure freepoint is pointing at a free element that is furthest left/highest
+            FreePoint+=FreePoint->size;
+            if ((((byte*)FreePoint-memory)/16)>=memory_size) { //iterated beyond end of block
+               FreePoint=(free_header_t*)memory; //Reset to begining of memory
+            }
+            if ((((byte*)FreePoint-memory)/16)==free_list_ptr){ //if its looped all the way around
+               max=1;
+               free_list_ptr=memory_size; //set furthest right so can be set properly when an element freed
+               break; //exit the loop
+            }
+         }
+         if (max==0) free_list_ptr=((byte*)FreePoint-memory)/16;
          return((void*)Head+HEADER_SIZE);
       } else {
-         offset=Head->next; //iterate to next block
+         offset=Head->next; //prepare for iteration
+         Head=(free_header_t*)memory+offset; //iterate to next bloc
       }
-      if (offset==free_list_ptr) return NULL; //Entire list iterated with no success therefore null
-   }
-   return NULL; // if it gets here something has gone wrong
+   } while (offset!=free_list_ptr); //if the list has been looped, using post test prevents overlap calculation
+   return NULL; //No possbile places to alloc so return NULL per specs
 }
 
 
@@ -146,55 +156,40 @@ void *vlad_malloc(u_int32_t n){ //need to add corruption testing, short circuiti
 
 void vlad_free(void *object){ //NOTE THAT OBJECT IS THE POINTER OF HEADER + N
    object-=HEADER_SIZE; //Find header pointer
-   free_header_t *Head=(free_header_t*)object;//find head
-   free_header_t *HeadSearch=(free_header_t*)object;
-   Head->magic=MAGIC_FREE; //set magic
-   //Find closest region
-   int found=0;
-   int looped=0;
-   while (found==0){ //need case for when its the only free object
-      HeadSearch+=HeadSearch->size;//iterate forward OCCURING TOO EARLY
-      if (HeadSearch->magic==MAGIC_FREE){ //found a free one
-         found=1;
-      }  else if ((((byte*)HeadSearch-memory)/16)>=memory_size&&looped==0) { //iterated beyond end of block
-         printf("looped\n");
-         HeadSearch=(free_header_t*)memory; //reset to begining NEED TO TEST THIS
-         looped=1;
-         if (HeadSearch->magic==MAGIC_FREE) found=1; //temp counter to issue of iterate occuring to early
+   free_header_t *Head=(free_header_t*)object;//specify head
+   free_header_t *HeadSearch=(free_header_t*)object;//Create search header for list iteration
+   while (HeadSearch->magic!=MAGIC_FREE){ //Iterate through memory to find next closest free element
+      HeadSearch+=HeadSearch->size;//iterate forward by size
+      if ((((byte*)HeadSearch-memory)/16)>=memory_size) { //iterated beyond end of block
+         HeadSearch=(free_header_t*)memory; //Reset to begining of memory
       }
+      if (HeadSearch==Head) break; //no other free headers so stop the loop
    }
-   Head->next=((byte*)HeadSearch-memory)/16;//headsearch offset
-
+   Head->magic=MAGIC_FREE; //free the header
+   Head->next=((byte*)HeadSearch-memory)/16;//link header into the free list, start with making header point to list
    Head->prev=HeadSearch->prev;
    free_header_t *HeadPrev=(free_header_t*)memory+Head->prev;
-   HeadSearch->prev=HeadPrev->next=((byte*)Head-memory)/16;
+   HeadSearch->prev=HeadPrev->next=((byte*)Head-memory)/16;//now that header points to list modify list to include it
 
-   //call free merge here
-   //Head is the freed header!!!
-   //make recursive till no possible merges from base header
-   int mergefail=0;
-   while (mergefail==0){
+   //MERGE PART OF FREE FUNCTION
+   while (1){//this could have a crazy long condition in it but to save space it iterates till no more mergers can be made, the condition if here would be an OR statment of the two conditions in the if statements below
       free_header_t *HeadmergeNext=(free_header_t*)memory+Head->next;
       free_header_t *HeadmergePrev=(free_header_t*)memory+Head->prev;
-      u_int32_t HeadOffset=((byte*)Head-memory)/16; //calculated here once to prevent execution times
-      u_int32_t HeadmergePrevOffset=((byte*)HeadmergePrev-memory)/16;
+      u_int32_t HeadOffset=((byte*)Head-memory)/16; //calculated here once to avoid multiple duplicate executions
+      u_int32_t HeadmergePrevOffset=((byte*)HeadmergePrev-memory)/16; //same as above
       if ((Head->size==HeadmergeNext->size)&&((HeadOffset+Head->size)==Head->next)&&(HeadmergeNext->magic==MAGIC_FREE)&&(HeadOffset%(Head->size*2)==0)){ //first statement checks if of equal size, second checks if it is a neighbour
-         printf("merging with next\n");//free next header
-         Head->next=HeadmergeNext->next;//point head at headernext->next
+         Head->next=HeadmergeNext->next;//free next header, point head at headernext->next
          free_header_t *HeadmergeNextnext=(free_header_t*)memory+Head->next;//point headernext->next* at head
-         HeadmergeNextnext->prev=HeadOffset;
-         Head->size=Head->size+HeadmergeNext->size;
-      } else if ((Head->size==HeadmergePrev->size)&&((HeadmergePrevOffset+HeadmergePrev->size)==HeadOffset)&&(HeadmergePrev->magic==MAGIC_FREE)&&((HeadOffset%(Head->size*2)!=0)||(HeadmergePrevOffset==0))){ //same as prev but for prev if that somehow happens when last head is fed in
-         printf("merging with prev\n");//free current header
-         //HeadPrev-> next skip to head->next
-         HeadmergePrev->next=Head->next;
-         //Headnext-> prev skip back to HeadPrev
-         HeadmergeNext->prev=HeadmergePrevOffset;
-         HeadmergePrev->size=HeadmergePrev->size+Head->size;
-         Head=HeadmergePrev;
+         HeadmergeNextnext->prev=HeadOffset; //make the header beyond the one been freed have its previous pointer point back at the now merged head
+         Head->size=Head->size+HeadmergeNext->size; //actually merge sizes
+      } else if ((Head->size==HeadmergePrev->size)&&((HeadmergePrevOffset+HeadmergePrev->size)==HeadOffset)&&(HeadmergePrev->magic==MAGIC_FREE)&&((HeadOffset%(Head->size*2)!=0)||(HeadmergePrevOffset==0))){
+         HeadmergePrev->next=Head->next;//free current header, HeadPrev-> next skip to head->next
+         HeadmergeNext->prev=HeadmergePrevOffset;//Headnext-> prev skip back to HeadPrev
+         HeadmergePrev->size=HeadmergePrev->size+Head->size; //actually merge sizes
+         Head=HeadmergePrev; //set header as the merged header for recursion and to prevent head pointing at a now non-existant head
       } else {
-         mergefail=1;
-         printf("no possible merge\n");
+         if (HeadOffset<free_list_ptr) free_list_ptr=HeadOffset; //set the freed head (always gets to this line even if no merge) as the new pointer, only if it is further left
+         return; //no possible legal merges and no more code to execute so stop recursion
       }
    }
 }
@@ -205,7 +200,7 @@ void vlad_free(void *object){ //NOTE THAT OBJECT IS THE POINTER OF HEADER + N
 // Postcondition: allocator is unusable until vlad_int() executed again
 
 void vlad_end(void){
-   free(memory); //end it all
+   free(memory); //end it all, global variables reset in init function
 }
 
 
@@ -215,7 +210,8 @@ void vlad_end(void){
 void vlad_stats(void){
    printf("Memory init at %p\n",memory);
    printf("Magic free is %u\n",MAGIC_FREE);
-   printf("Magic Allocated is %u\n\n",MAGIC_ALLOC);
+   printf("Magic Allocated is %u\n",MAGIC_ALLOC);
+   printf("Free List pointer thing is %u\n\n",free_list_ptr);
    /*free_header_t *Head=(free_header_t*)memory;
    printf("Memory read initial block %u\n",Head->magic);*/
    int offset=0;
