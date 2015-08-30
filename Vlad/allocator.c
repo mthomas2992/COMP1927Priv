@@ -92,6 +92,7 @@ void vlad_init(u_int32_t size){
 //                      n + header size.
 
 void *vlad_malloc(u_int32_t n){ //need to add corruption testing, short circuiting
+   if ((n==0)||(n>=memory_size)) return NULL;//attempt to get memory of invalid size
    u_int32_t offset=free_list_ptr;
    free_header_t *Head=(free_header_t*)memory+offset;
    do{
