@@ -116,27 +116,24 @@ void *vlad_malloc(u_int32_t n){ //need to add corruption testing, short circuiti
             Head->size=Head->size/2;
             Head->next=offset+Head->size;
          }
+         if (Head->next==offset){ //to fulfil specification requirement of there always been a free element
+            return NULL;
+         }
          //Perfect achieved, allocated and append out of free list
          Head->magic=MAGIC_ALLOC;
          free_header_t *HeadPrev=(free_header_t*)memory+Head->prev;
          free_header_t *HeadNext=(free_header_t*)memory+Head->next;
          HeadPrev->next=Head->next;
          HeadNext->prev=Head->prev;
-         //free pointer logic
+         //free pointer logic, if the specification of always one element in the list was not present an extra if statement would be added to prevent inifinite loop (as did exist....)
          free_header_t *FreePoint=(free_header_t*)memory+free_list_ptr;
-         int max=0;
          while (FreePoint->magic!=MAGIC_FREE){ //ensure freepoint is pointing at a free element that is furthest left/highest
             FreePoint+=FreePoint->size;
             if ((((byte*)FreePoint-memory)/16)>=memory_size) { //iterated beyond end of block
                FreePoint=(free_header_t*)memory; //Reset to begining of memory
             }
-            if ((((byte*)FreePoint-memory)/16)==free_list_ptr){ //if its looped all the way around
-               max=1;
-               free_list_ptr=memory_size; //set furthest right so can be set properly when an element freed
-               break; //exit the loop
-            }
          }
-         if (max==0) free_list_ptr=((byte*)FreePoint-memory)/16;
+         free_list_ptr=((byte*)FreePoint-memory)/16;
          return((void*)Head+HEADER_SIZE);
       } else {
          offset=Head->next; //prepare for iteration
@@ -158,7 +155,15 @@ void vlad_free(void *object){ //NOTE THAT OBJECT IS THE POINTER OF HEADER + N
    object-=HEADER_SIZE; //Find header pointer
    free_header_t *Head=(free_header_t*)object;//specify head
    free_header_t *HeadSearch=(free_header_t*)object;//Create search header for list iteration
+   if (Head->magic!=MAGIC_ALLOC){ //check not somehow been fed already freed memory
+      fprintf(stderr, "Attempt to free non-allocated memory");
+      abort();
+   }
    while (HeadSearch->magic!=MAGIC_FREE){ //Iterate through memory to find next closest free element
+      if ((HeadSearch->magic!=MAGIC_FREE)&&(HeadSearch->magic!=MAGIC_ALLOC)){ //corruption check
+         fprintf(stderr, "Memory corruption\n");
+         abort();
+      }
       HeadSearch+=HeadSearch->size;//iterate forward by size
       if ((((byte*)HeadSearch-memory)/16)>=memory_size) { //iterated beyond end of block
          HeadSearch=(free_header_t*)memory; //Reset to begining of memory
@@ -189,7 +194,7 @@ void vlad_free(void *object){ //NOTE THAT OBJECT IS THE POINTER OF HEADER + N
          Head=HeadmergePrev; //set header as the merged header for recursion and to prevent head pointing at a now non-existant head
       } else {
          if (HeadOffset<free_list_ptr) free_list_ptr=HeadOffset; //set the freed head (always gets to this line even if no merge) as the new pointer, only if it is further left
-         return; //no possible legal merges and no more code to execute so stop recursion
+         return; //no possible legal merges and no more code to execute so stop loop
       }
    }
 }
@@ -208,12 +213,10 @@ void vlad_end(void){
 // Postcondition: allocator stats displayed on stdout
 
 void vlad_stats(void){
-   printf("Memory init at %p\n",memory);
+   /*printf("Memory init at %p\n",memory);
    printf("Magic free is %u\n",MAGIC_FREE);
    printf("Magic Allocated is %u\n",MAGIC_ALLOC);
    printf("Free List pointer thing is %u\n\n",free_list_ptr);
-   /*free_header_t *Head=(free_header_t*)memory;
-   printf("Memory read initial block %u\n",Head->magic);*/
    int offset=0;
    //lets write a loop that prints all current free blocks
    while (offset<memory_size){
@@ -227,10 +230,9 @@ void vlad_stats(void){
       printf("Size %u\n",Head->size);
       printf("Previous index %u\n",Head->prev);
       printf("Next index %u\n\n",Head->next);
-      //if (Head->next==0) x=0; else offset+=Head->next;
       offset+=Head->size; //move on to next block
    }
-   return;
+   return;*/
 }
 
 
